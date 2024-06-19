@@ -6,9 +6,9 @@ import argparse
 import random
 from stringcolor import *
 import sys
+from tabulate import tabulate
 
 VERSION = "0.1.1"
-
 
 def get_unique_dicts(list):
     # Ensure each dictionary is converted to a frozenset of its items, which is hashable and can be used in a set.
@@ -21,10 +21,6 @@ def get_unique_dicts(list):
 
 def main():
 
-    # Show help if no arguments are provided
-    if len(sys.argv) == 1:
-        parser.print_help()
-        sys.exit(1)
     baseUrl          = 'https://www.postman.com/'
     urlProxy         = baseUrl+'_api/ws/proxy'
     urlenvapi        = baseUrl+'_api/environment/'
@@ -48,17 +44,19 @@ def main():
     )
     parser.add_argument('query', type=str, help='Query string (example: api.target.com)')
     parser.add_argument('maxresults', type=int, help='Max number of results\n example',default=10, nargs='?')
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode.\nThis will print additional debug information.")
 
     #scan only a given workspace url 
 
     #only search for requests
 
     args = parser.parse_args()
-    print("\nScan report for " + f"{args.query}")
+    # Show help if no arguments are provided
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
 
-    #Read the keywords from the file
-    #with open('keywords.txt', 'r') as file:
-    #    keywords = [line.strip() for line in file]
+    print("\nScan report for " + f"{args.query}")
 
     # List of user agents
     with open('useragents.txt', 'r') as file:
@@ -104,6 +102,8 @@ def main():
             response = requests.post(urlProxy, headers=headers, json=data_raw)
             response.raise_for_status()  # Raise an HTTPError for bad responses (4xx and 5xx)
             data = response.json()  # Parse JSON response if needed
+            if args.debug:
+                print(f'POST Response searching for {args.query} \n {data}')
         except requests.exceptions.HTTPError as http_err:
             print(f"HTTP error occurred: {http_err}")
             sys.exit(1)
@@ -173,63 +173,75 @@ def main():
             "method": "GET",
             "path": f"/workspaces?handle={worksp}&slug={workspnam}"
         }
-
+        # get Details of workspaces
         responseid = requests.post(urlProxy, headers=headers, json=data_rawid)
         iddiv = responseid.json()
+        if args.debug:
+	        print(f'POST Response getting details for workspace {workspace} \n {iddiv}')
 
+        workspaceId  	 = iddiv['data'][0]['id']
+        workspaceName    = iddiv['data'][0]['name']
+        workspaceDesc    = iddiv['data'][0]['description']
+        workspaceCreated = iddiv['data'][0]['createdAt']
+
+        print(f'Name: {workspaceName}')
+        print(f'Description: {workspaceDesc}')
+        print(f'Created at: {workspaceCreated}\n')
         if 'error' in iddiv:
             continue
-
-        idwork = iddiv['data'][0]['id']
 
         data_raw = {
             "service": "workspaces",
             "method": "GET",
-            "path": f"/workspaces/{idwork}?include=elements"
+            "path": f"/workspaces/{workspaceId}?include=elements"
         }
         #get Collection
-        responsedisco = requests.post(urlProxy, headers=headers, json=data_raw)
-        all_uuid = responsedisco.json()
+        response = requests.post(urlProxy, headers=headers, json=data_raw)
+        all_uuid = response.json()
+        if args.debug:
+            print(f'POST Response getting Colletions for workspace {workspace} \n {all_uuid}')
 
-        if 'collections' in all_uuid['data']['elements']:
-            urlcollec = all_uuid['data']['elements']['collections']
-        else:
-            urlcollec = []
-        for urlc in urlcollec:
-            listeallcollec.append(urlc)
+        urlcollec = all_uuid['data']['elements'].get('collections', [])
+        listeallcollec.extend(urlcollec)
 
         print(Fore.GREEN + str(len(listeallcollec)) +" Collections found" + Style.RESET_ALL)
         # Print each Collection with line numbers
         for i, urlc in enumerate(listeallcollec, start=1):
             print(f"{i}. {workspace}/collection/{urlc}")
 
-        if 'environments' in all_uuid['data']['elements']:
-            urlenv = all_uuid['data']['elements']['environments']
-        else:
-            urlenv = []
+        urlenv = all_uuid['data']['elements'].get('environments', [])
 
         env_list = [] 
+        env_names = [] 
 
         for urle in urlenv:
-            urlenvfinal = workspace + "environment/" + urle
+           # urlenvfinal = workspace + "environment/" + urle
             apienvurl = urlenvapi + urle
-            responseapi = requests.get(apienvurl, headers=headers)
-            environment = responseapi.json()
-             # Check if 'data' key exists in the JSON response
-            if 'data' in environment:
-                nameenv = environment['data']['name']
-                env = environment['data']['values']
-                #print(f"Environment name: {nameenv}")
-            else:
-                print("Key 'data' not found in API response.")
-            # Check if env exists and is not empty
-            if 'data' in environment and 'values' in environment['data'] and environment['data']['values']:
-                env_list.append(environment['data']['values'])
-        print(Fore.GREEN + str(len(env_list)) +" Environment values found" + Style.RESET_ALL)
-        for i, envValue in enumerate(env_list, start=1):
-            print(f"{i}. {envValue}")
+            response = requests.get(apienvurl, headers=headers)
+            environment = response.json()
+            # Check if 'data' key exists in the JSON response
+            envName = environment.get('data', {}).get('name')
+            #print(envName)
+            if envName:
+                env_names.append(envName)   
+            envValues = environment.get('data', {}).get('values')
+            if envValues:
+                env_list.append(envValues)
+        print(Fore.GREEN + str(len(env_list)) +" Environment found" + Style.RESET_ALL)
+        #for i, envValue in enumerate(env_list, start=1):
+            #print(f"{i}. {envValue}")
+        for j, item in enumerate(env_names,start=1):
+            print(f"{j}. {item}")
+            for i, item in enumerate(env_list, start=1):
+                env_dict = item[0]  # Extract the dictionary from the list
+                # Convert dictionary to a list of tuples for tabulate
+                table_data = [(key, value) for key, value in list(env_dict.items())[:2]]
 
-    print('Done!\n')
+                # Print as table with aligned columns
+                print(f"{i} .")
+                for key, value in table_data:
+                   print(f" {key}: {value}")
+    print('\nDone!\n')
     #done scanning for collections and enviroments vars
 
     reqtrouv = 0
