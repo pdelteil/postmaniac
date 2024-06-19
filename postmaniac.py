@@ -9,18 +9,6 @@ import sys
 
 VERSION = "0.1.1"
 
-def find_croustillant(datacr,keywords):
-	#input is dictionary
-    if isinstance(datacr, dict):
-        for key, value in datacr.items():        
-            if key in keywords: 
-                bodylist.append(value)
-            else:
-                find_croustillant(value,keywords)
-	#input is a list
-    elif isinstance(datacr, list):
-        for itemcr in datacr:
-            find_croustillant(itemcr,keywords)
 
 def get_unique_dicts(list):
     # Ensure each dictionary is converted to a frozenset of its items, which is hashable and can be used in a set.
@@ -33,6 +21,10 @@ def get_unique_dicts(list):
 
 def main():
 
+    # Show help if no arguments are provided
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
     baseUrl          = 'https://www.postman.com/'
     urlProxy         = baseUrl+'_api/ws/proxy'
     urlenvapi        = baseUrl+'_api/environment/'
@@ -43,16 +35,30 @@ def main():
     urlsWorkspaces = []
     urlsteam = []
 
-    parser = argparse.ArgumentParser(description='Postman OSINT tool to extract creds, token, username, email & more from Postman Public Workspaces')
-    parser.add_argument('query', type=str, help='name of the target (example: tesla)')
-    parser.add_argument('maxresults', type=int, help='max number of results',default=100, nargs='?')
+    parser = argparse.ArgumentParser(
+        description=(
+            "Tool to find sensitive information from Postman Public Workspaces\n"
+            "\nExamples of use:\n\n"
+            "  Searching for term google.com\n"
+            "  python3 postmaniac.py google.com\n"
+            "  Searching for term google.com showing max 50 results\n"            
+            "  python3 postmaniac.py google.com 50\n"
+        ),
+    formatter_class=argparse.RawTextHelpFormatter   
+    )
+    parser.add_argument('query', type=str, help='Query string (example: api.target.com)')
+    parser.add_argument('maxresults', type=int, help='Max number of results\n example',default=10, nargs='?')
+
+    #scan only a given workspace url 
+
+    #only search for requests
 
     args = parser.parse_args()
     print("\nScan report for " + f"{args.query}")
 
     #Read the keywords from the file
-    with open('keywords.txt', 'r') as file:
-        keywords = [line.strip() for line in file]
+    #with open('keywords.txt', 'r') as file:
+    #    keywords = [line.strip() for line in file]
 
     # List of user agents
     with open('useragents.txt', 'r') as file:
@@ -61,7 +67,7 @@ def main():
     random_user_agent = random.choice(user_agents)
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:102.0) Gecko/20100101 Firefox/102.0',
+        'User-Agent': random_user_agent,
         'Content-Type': 'application/json',
     }
     size=100
@@ -75,7 +81,11 @@ def main():
         "method": "POST",
         "path": "/search-all",
         "body": {
-            "queryIndices": ["collaboration.workspace", "runtime.collection", "runtime.request", "adp.api", "flow.flow",
+            "queryIndices": ["collaboration.workspace", 
+                             "runtime.collection", 
+                             "runtime.request", 
+                             "adp.api", 
+                             "flow.flow",
                              "apinetwork.team"],
             "queryText": f"{args.query}",
             "size": size,
@@ -85,11 +95,12 @@ def main():
             "nonNestedRequests": True
         }
     }
-
+    
     for i in range(pages):
         try:
             remaining_results = args.maxresults - (i * 100)
             data_raw["body"]["size"] = min(remaining_results,100)
+            # run query
             response = requests.post(urlProxy, headers=headers, json=data_raw)
             response.raise_for_status()  # Raise an HTTPError for bad responses (4xx and 5xx)
             data = response.json()  # Parse JSON response if needed
@@ -127,8 +138,10 @@ def main():
                 urlsWorkspaces.append(urlworkspace2)
 
     urlsWorkspaces = list(set(urlsWorkspaces))
-    urlsteam = list(set(urlsteam))
+    urlsWorkspaces = urlsWorkspaces[:args.maxresults]
 
+    urlsteam = list(set(urlsteam))
+    
     print("\n"+Fore.RED + str(len(urlsWorkspaces)) +" Workspaces found" + Style.RESET_ALL)
     # Print each URL with line numbers
     for i, workspaceUrl in enumerate(urlsWorkspaces, start=1):
@@ -275,10 +288,9 @@ def main():
             else:
                 pass
             order.extend(suborder)
-        reqtrouv = len(order)  
+        reqtrouv = len(order)
         print(Fore.GREEN + f"\t{str(reqtrouv)}"+ " Requests found" + Style.RESET_ALL+"\n")
         pattern = re.compile(r'^\{\{.*\}\}$')
-    
         #Requests per folder
         for request in order:
             urlrequestfull = urlrequest + owner + "-" + request
@@ -325,7 +337,6 @@ def main():
                 try:
                     if body1 is not None and body1.strip():
                         parsed_data = json.loads(body1)
-                        find_croustillant(parsed_data,keywords)
                     else:
                         pass
                 except json.JSONDecodeError as e:
@@ -338,10 +349,7 @@ def main():
             #datamode params
             if datamode == "params" and requestresp['data']['data'] is not None and len(requestresp['data']["data"]) > 0:
                 datas = requestresp['data']["data"]
-                for nom in datas:
-                     if nom['key'] in keywords:
-                        bodylist.append(nom['value'])
-
+                print(datas)
 
 if __name__ == '__main__':
     main()
